@@ -45,7 +45,7 @@ if is_torch_available():
 @require_torch
 class CacheTest(unittest.TestCase):
     def test_dynamic_cache_retrocompatibility(self):
-        """Tests that we can convert back and forth between the NEW legacy cache format and DynamicCache"""
+        """Tests that we can convert back and forth between the legacy cache format and DynamicCache"""
         legacy_cache = ()
         new_cache = DynamicCache()
 
@@ -54,62 +54,42 @@ class CacheTest(unittest.TestCase):
             new_key = torch.rand((2, 4, 8, 16))
             new_value = torch.rand((2, 4, 8, 16))
             new_cache.update(new_key, new_value, layer_idx)
-            legacy_cache += (([new_key], [new_value]),)
+            legacy_cache += ((new_key, new_value),)
 
         # Sanity check 1: they must have the same shapes
         self.assertTrue(len(legacy_cache), len(new_cache))
         for layer_idx in range(10):
             self.assertTrue(len(legacy_cache[layer_idx]), len(legacy_cache[layer_idx]))
-            for tensor_idx in range(len(legacy_cache[layer_idx][0])):
+            for key_value_idx in range(2):
                 self.assertTrue(
-                    legacy_cache[layer_idx][0][tensor_idx].shape == new_cache.key_cache[layer_idx][tensor_idx].shape
-                )
-                self.assertTrue(
-                    legacy_cache[layer_idx][1][tensor_idx].shape == new_cache.value_cache[layer_idx][tensor_idx].shape
+                    legacy_cache[layer_idx][key_value_idx].shape == new_cache[layer_idx][key_value_idx].shape
                 )
 
         # Sanity check 2: we can get the sequence length in multiple ways with DynamicCache, and they return the
         # expected value
-        self.assertTrue(
-            legacy_cache[0][0][0].shape[-2] == new_cache.key_cache[0][0].shape[-2] == new_cache.get_seq_length() == 8
-        )
+        self.assertTrue(legacy_cache[0][0].shape[-2] == new_cache[0][0].shape[-2] == new_cache.get_seq_length() == 8)
 
-        # Sanity check 3: they must be equal
+        # Sanity check 3: they must be equal, and both support indexing
         for layer_idx in range(10):
-            for tensor_idx in range(len(legacy_cache[layer_idx][0])):
+            for key_value_idx in range(2):
                 self.assertTrue(
-                    torch.allclose(new_cache.key_cache[layer_idx][tensor_idx], legacy_cache[layer_idx][0][tensor_idx])
-                )
-                self.assertTrue(
-                    torch.allclose(
-                        new_cache.value_cache[layer_idx][tensor_idx], legacy_cache[layer_idx][1][tensor_idx]
-                    )
+                    torch.allclose(new_cache[layer_idx][key_value_idx], legacy_cache[layer_idx][key_value_idx])
                 )
 
         # Test 1: We can convert from legacy to new with no changes
         from_legacy = DynamicCache.from_legacy_cache(legacy_cache)
         for layer_idx in range(10):
-            for tensor_idx in range(len(legacy_cache[layer_idx][0])):
+            for key_value_idx in range(2):
                 self.assertTrue(
-                    torch.allclose(
-                        from_legacy.key_cache[layer_idx][tensor_idx], legacy_cache[layer_idx][0][tensor_idx]
-                    )
-                )
-                self.assertTrue(
-                    torch.allclose(
-                        from_legacy.value_cache[layer_idx][tensor_idx], legacy_cache[layer_idx][1][tensor_idx]
-                    )
+                    torch.allclose(from_legacy[layer_idx][key_value_idx], legacy_cache[layer_idx][key_value_idx])
                 )
 
         # Test 2: We can convert from new to legacy with no changes
         to_legacy = new_cache.to_legacy_cache()
         for layer_idx in range(10):
-            for tensor_idx in range(len(legacy_cache[layer_idx][0])):
+            for key_value_idx in range(2):
                 self.assertTrue(
-                    torch.allclose(to_legacy[layer_idx][0][tensor_idx], new_cache.key_cache[layer_idx][tensor_idx])
-                )
-                self.assertTrue(
-                    torch.allclose(to_legacy[layer_idx][1][tensor_idx], new_cache.value_cache[layer_idx][tensor_idx])
+                    torch.allclose(to_legacy[layer_idx][key_value_idx], new_cache[layer_idx][key_value_idx])
                 )
 
     def test_reorder_cache_retrocompatibility(self):
@@ -124,7 +104,7 @@ class CacheTest(unittest.TestCase):
             new_key = torch.rand((4, 4, 8, 16))
             new_value = torch.rand((4, 4, 8, 16))
             new_cache.update(new_key, new_value, layer_idx)
-            legacy_cache += (([new_key], [new_value]),)
+            legacy_cache += ((new_key, new_value),)
 
         # Let's create some dummy beam indices. From the shape above, it is equivalent to the case where num_beams=4
         # and batch_size=1
@@ -135,15 +115,10 @@ class CacheTest(unittest.TestCase):
 
         # Let's check that the results are the same
         for layer_idx in range(10):
-            for tensor_idx in range(len(legacy_cache[layer_idx][0])):
+            for key_value_idx in range(2):
                 self.assertTrue(
                     torch.allclose(
-                        new_cache.key_cache[layer_idx][tensor_idx], legacy_cache_reordered[layer_idx][0][tensor_idx]
-                    )
-                )
-                self.assertTrue(
-                    torch.allclose(
-                        new_cache.value_cache[layer_idx][tensor_idx], legacy_cache_reordered[layer_idx][1][tensor_idx]
+                        new_cache[layer_idx][key_value_idx], legacy_cache_reordered[layer_idx][key_value_idx]
                     )
                 )
 
