@@ -249,18 +249,6 @@ class HybridMambaAttentionDynamicCache(DynamicCache):
         self.key_cache = [torch.tensor([[]] * batch_size, device=device) for _ in range(config.num_hidden_layers)]
         self.value_cache = [torch.tensor([[]] * batch_size, device=device) for _ in range(config.num_hidden_layers)]
 
-    # Override as DynamicCache data structure changed but not this class
-    def __getitem__(self, layer_idx: int) -> List[Tuple[torch.Tensor]]:
-        if layer_idx < len(self):
-            return self.key_cache[layer_idx], self.value_cache[layer_idx]
-        else:
-            raise KeyError(f"Cache only has {len(self)} layers, attempted to access layer with index {layer_idx}")
-
-    # Override as DynamicCache data structure changed but not this class
-    def __iter__(self):
-        for layer_idx in range(len(self)):
-            yield self.key_cache[layer_idx], self.value_cache[layer_idx]
-
     def update(
         self,
         key_states: torch.Tensor,

@@ -1430,7 +1430,7 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
                 past_length = past_key_values.seen_tokens
                 max_cache_length = past_key_values.get_max_length()
             else:
-                cache_length = past_length = sum(x.shape[-2] for x in past_key_values[0][0])
+                cache_length = past_length = past_key_values[0][0].shape[2]
                 max_cache_length = None
 
             # Keep only the unprocessed tokens:
@@ -1480,12 +1480,11 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
 
     @staticmethod
     def _reorder_cache(past_key_values, beam_idx):
-        # Because index_select() performs a copy anyway, but is inefficient to run for each tensor in the list,
-        # we first cat() the tensors and then index_select(). This keeps the same memory footprint, but is much faster
-        reordered_past = tuple(
-            tuple([torch.cat(state, dim=-2).index_select(0, beam_idx.to(state[0].device))] for state in layer_past)
-            for layer_past in past_key_values
-        )
+        reordered_past = ()
+        for layer_past in past_key_values:
+            reordered_past += (
+                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
+            )
         return reordered_past
 
 

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import torch
 
-from ..cache_utils import DynamicCache
+from ..cache_utils import EfficientDynamicCache, DynamicCache
 
 
 if TYPE_CHECKING:
@@ -337,84 +337,6 @@ class PromptLookupCandidateGenerator(CandidateGenerator):
         return
 
 
-def _crop_past_key_values_new_format(past_key_values, maximum_length):
-    """Crops the past K-V in the case when they are in the new format Tuple[Tuple[List[Tensor]]].
-    It consists in taking the tensors in the list until we hit a size bigger than `maximum_length`, and then cropping
-    one last tensor until `maximum_length`."""
-    # Compatibility for HybridMambaAttentionDynamicCache which is a subclass of DynamicCache but still in the old format
-    if (
-        isinstance(past_key_values, DynamicCache)
-        and past_key_values.__class__.__name__ == "HybridMambaAttentionDynamicCache"
-    ):
-        for idx in range(len(past_key_values.key_cache)):
-            if past_key_values.value_cache[idx].shape[-1] != 0:
-                past_key_values.key_cache[idx] = past_key_values.key_cache[idx][:, :, :maximum_length, :]
-                past_key_values.value_cache[idx] = past_key_values.value_cache[idx][:, :, :maximum_length, :]
-
-        return past_key_values
-
-    # Usual DynamicCache
-    elif isinstance(past_key_values, DynamicCache):
-        if past_key_values.get_seq_length() <= maximum_length:
-            return past_key_values
-
-        # Compute limits
-        cumulative_length = 0
-        last = 0
-        for tensor in past_key_values.key_cache[0]:
-            current_length = tensor.shape[-2]
-            if cumulative_length + current_length < maximum_length:
-                last += 1
-                cumulative_length += current_length
-            elif cumulative_length + current_length == maximum_length:
-                last_tensor_size = current_length
-                break
-            else:
-                last_tensor_size = maximum_length - cumulative_length
-                break
-
-        for idx in range(len(past_key_values.key_cache)):
-            past_key_values.key_cache[idx] = past_key_values.key_cache[idx][:last] + [
-                past_key_values.key_cache[idx][last][:, :, :last_tensor_size, :]
-            ]
-            past_key_values.value_cache[idx] = past_key_values.value_cache[idx][:last] + [
-                past_key_values.value_cache[idx][last][:, :, :last_tensor_size, :]
-            ]
-
-        return past_key_values
-
-    elif isinstance(past_key_values[0][0], list):
-        if sum(x.shape[-2] for x in past_key_values[0][0]) <= maximum_length:
-            return past_key_values
-
-        new_past = []
-        # Compute limits
-        cumulative_length = 0
-        last = 0
-        last_tensor_size = 0
-        for tensor in past_key_values[0][0]:
-            current_length = tensor.shape[-2]
-            if cumulative_length + current_length < maximum_length:
-                last += 1
-                cumulative_length += current_length
-            elif cumulative_length + current_length == maximum_length:
-                last_tensor_size = current_length
-                break
-            else:
-                last_tensor_size = maximum_length - cumulative_length
-                break
-
-        new_past = tuple(
-            (
-                past_key_values[idx][0][:last] + [past_key_values[idx][0][last][:, :, :last_tensor_size, :]],
-                past_key_values[idx][1][:last] + [past_key_values[idx][1][last][:, :, :last_tensor_size, :]],
-            )
-            for idx in range(len(past_key_values))
-        )
-
-        return new_past
-
-
 def _crop_past_key_values(model, past_key_values, maximum_length):
     """Crops the past key values up to a certain maximum length."""
     new_past = []
@@ -452,20 +374,22 @@ def _crop_past_key_values(model, past_key_values, maximum_length):
             for idx in range(len(past_key_values)):
                 past_key_values[idx] = past_key_values[idx][:, :, :maximum_length, :]
     elif isinstance(past_key_values, DynamicCache):
-        past_key_values = _crop_past_key_values_new_format(past_key_values, maximum_length)
+        for idx in range(len(past_key_values.key_cache)):
+            if past_key_values.value_cache[idx].shape[-1] != 0:
+                past_key_values.key_cache[idx] = past_key_values.key_cache[idx][:, :, :maximum_length, :]
+                past_key_values.value_cache[idx] = past_key_values.value_cache[idx][:, :, :maximum_length, :]
+    elif isinstance(past_key_values, EfficientDynamicCache):
+        past_key_values.crop(maximum_length)   
 
     elif past_key_values is not None:
-        if isinstance(past_key_values[0][0], list):
-            past_key_values = _crop_past_key_values_new_format(past_key_values, maximum_length)
-        else:
-            for idx in range(len(past_key_values)):
-                new_past.append(
-                    (
-                        past_key_values[idx][0][:, :, :maximum_length, :],
-                        past_key_values[idx][1][:, :, :maximum_length, :],
-                    )
+        for idx in range(len(past_key_values)):
+            new_past.append(
+                (
+                    past_key_values[idx][0][:, :, :maximum_length, :],
+                    past_key_values[idx][1][:, :, :maximum_length, :],
                 )
-            past_key_values = tuple(new_past)
+            )
+        past_key_values = tuple(new_past)
 
     return past_key_values
 
