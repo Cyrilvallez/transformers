@@ -1597,7 +1597,8 @@ class Idefics2Model(Idefics2PreTrainedModel):
 
         past_seen_tokens = 0
         if use_cache:
-            if not isinstance(past_key_values, Cache):
+            use_legacy_cache = not isinstance(past_key_values, Cache)
+            if use_legacy_cache:
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             past_seen_tokens = past_key_values.get_usable_length(seq_length)
 

@@ -1133,7 +1133,8 @@ class DbrxModel(DbrxPreTrainedModel):
 
         past_seen_tokens = 0
         if use_cache:  # kept for BC (cache positions)
-            if not isinstance(past_key_values, StaticCache):
+            use_legacy_cache = not isinstance(past_key_values, Cache)
+            if use_legacy_cache:
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
                 past_seen_tokens = past_key_values.get_seq_length()
 
@@ -1204,9 +1205,7 @@ class DbrxModel(DbrxPreTrainedModel):
 
         next_cache = None
         if use_cache:
-            next_cache = (
-                next_decoder_cache.to_legacy_cache() if isinstance(next_decoder_cache, Cache) else next_decoder_cache
-            )
+            next_cache = next_decoder_cache.to_legacy_cache() if use_legacy_cache else next_decoder_cache
         if not return_dict:
             return tuple(
                 v

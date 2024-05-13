@@ -383,6 +383,12 @@ class EfficientDynamicCache(Cache):
         restack_limit: int | None = None,
     ) -> "EfficientDynamicCache":
         """Converts a cache in the legacy cache format Tuple[Tuple[torch.Tensor]] or Tuple[Tuple[List[torch.Tensor]]] into an equivalent `EfficientDynamicCache`."""
+        # Small check to ensure that model implementation will not use `from_legacy_cache()` with an already existing EfficientDynamicCache instance.
+        # That would result in a copy that would annihilate the purpose of this class, and given that the old implementation
+        # would trigger this case, it could arise again in the future when adding Cache classes to more models
+        if isinstance(past_key_values, Cache):
+            raise ValueError("Cannot use `from_legacy_cache()` with a Cache instance.")
+
         cache = cls(restack_limit=restack_limit)
         if past_key_values is not None:
             for layer_idx in range(len(past_key_values)):
