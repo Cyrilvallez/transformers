@@ -24,7 +24,7 @@ import torch
 import torch.distributed as dist
 from torch import nn
 
-from ..cache_utils import Cache, DynamicCache, EfficientDynamicCache, StaticCache
+from ..cache_utils import Cache, DynamicCache, StaticCache
 from ..integrations.deepspeed import is_deepspeed_zero3_enabled
 from ..modeling_outputs import CausalLMOutputWithPast, Seq2SeqLMOutput
 from ..models.auto import (
@@ -1530,7 +1530,7 @@ class GenerationMixin:
         # Use DynamicCache() instance by default. This will avoid back and forth from legacy format that
         # keeps copying the cache thus using much more memory
         elif generation_config.cache_implementation is None and self._supports_cache_class:
-            past = model_kwargs.get('past_key_values', None)
+            past = model_kwargs.get("past_key_values", None)
             if past is None:
                 model_kwargs["past_key_values"] = DynamicCache()
             elif isinstance(past, tuple):
@@ -1613,16 +1613,27 @@ class GenerationMixin:
                 streamer=streamer,
                 **model_kwargs,
             )
-        if generation_mode == GenerationMode.GREEDY_SEARCH:
-            # 11. run greedy search
-            result = self._greedy_search(
+        elif generation_mode in (GenerationMode.SAMPLE, GenerationMode.GREEDY_SEARCH):
+            # 11. prepare logits warper
+            prepared_logits_warper = (
+                self._get_logits_warper(generation_config) if generation_config.do_sample else None
+            )
+
+            # 12. expand input_ids with `num_return_sequences` additional sequences per batch
+            input_ids, model_kwargs = self._expand_inputs_for_generation(
+                input_ids=input_ids,
+                expand_size=generation_config.num_return_sequences,
+                is_encoder_decoder=self.config.is_encoder_decoder,
+                **model_kwargs,
+            )
+
+            # 13. run sample (it degenerates to greedy search when `generation_config.do_sample=False`)
+            result = self._sample(
                 input_ids,
                 logits_processor=prepared_logits_processor,
+                logits_warper=prepared_logits_warper,
                 stopping_criteria=prepared_stopping_criteria,
-                pad_token_id=generation_config.pad_token_id,
-                output_scores=generation_config.output_scores,
-                output_logits=generation_config.output_logits,
-                return_dict_in_generate=generation_config.return_dict_in_generate,
+                generation_config=generation_config,
                 synced_gpus=synced_gpus,
                 streamer=streamer,
                 **model_kwargs,
@@ -1648,69 +1659,11 @@ class GenerationMixin:
                 **model_kwargs,
             )
 
-        elif generation_mode == GenerationMode.SAMPLE:
+        elif generation_mode in (GenerationMode.BEAM_SAMPLE, GenerationMode.BEAM_SEARCH):
             # 11. prepare logits warper
-            logits_warper = self._get_logits_warper(generation_config)
-
-            # 12. expand input_ids with `num_return_sequences` additional sequences per batch
-            input_ids, model_kwargs = self._expand_inputs_for_generation(
-                input_ids=input_ids,
-                expand_size=generation_config.num_return_sequences,
-                is_encoder_decoder=self.config.is_encoder_decoder,
-                **model_kwargs,
+            prepared_logits_warper = (
+                self._get_logits_warper(generation_config) if generation_config.do_sample else None
             )
-
-            # 13. run sample
-            result = self._sample(
-                input_ids,
-                logits_processor=prepared_logits_processor,
-                logits_warper=logits_warper,
-                stopping_criteria=prepared_stopping_criteria,
-                pad_token_id=generation_config.pad_token_id,
-                output_scores=generation_config.output_scores,
-                output_logits=generation_config.output_logits,
-                return_dict_in_generate=generation_config.return_dict_in_generate,
-                synced_gpus=synced_gpus,
-                streamer=streamer,
-                **model_kwargs,
-            )
-
-        elif generation_mode == GenerationMode.BEAM_SEARCH:
-            # 11. prepare beam search scorer
-            beam_scorer = BeamSearchScorer(
-                batch_size=batch_size,
-                num_beams=generation_config.num_beams,
-                device=inputs_tensor.device,
-                length_penalty=generation_config.length_penalty,
-                do_early_stopping=generation_config.early_stopping,
-                num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                max_length=generation_config.max_length,
-            )
-            # 12. interleave input_ids with `num_beams` additional sequences per batch
-            input_ids, model_kwargs = self._expand_inputs_for_generation(
-                input_ids=input_ids,
-                expand_size=generation_config.num_beams,
-                is_encoder_decoder=self.config.is_encoder_decoder,
-                **model_kwargs,
-            )
-            # 13. run beam search
-            result = self._beam_search(
-                input_ids,
-                beam_scorer,
-                logits_processor=prepared_logits_processor,
-                stopping_criteria=prepared_stopping_criteria,
-                pad_token_id=generation_config.pad_token_id,
-                output_scores=generation_config.output_scores,
-                output_logits=generation_config.output_logits,
-                return_dict_in_generate=generation_config.return_dict_in_generate,
-                synced_gpus=synced_gpus,
-                sequential=generation_config.low_memory,
-                **model_kwargs,
-            )
-
-        elif generation_mode == GenerationMode.BEAM_SAMPLE:
-            # 11. prepare logits warper
-            logits_warper = self._get_logits_warper(generation_config)
 
             # 12. prepare beam search scorer
             beam_scorer = BeamSearchScorer(
@@ -1732,16 +1685,13 @@ class GenerationMixin:
             )
 
             # 14. run beam sample
-            result = self._beam_sample(
+            result = self._beam_search(
                 input_ids,
                 beam_scorer,
                 logits_processor=prepared_logits_processor,
-                logits_warper=logits_warper,
+                logits_warper=prepared_logits_warper,
                 stopping_criteria=prepared_stopping_criteria,
-                pad_token_id=generation_config.pad_token_id,
-                output_scores=generation_config.output_scores,
-                output_logits=generation_config.output_logits,
-                return_dict_in_generate=generation_config.return_dict_in_generate,
+                generation_config=generation_config,
                 synced_gpus=synced_gpus,
                 **model_kwargs,
             )
@@ -2166,7 +2116,7 @@ class GenerationMixin:
                         for item in layer:
                             items.append(item.repeat_interleave(top_k, dim=0))
                         new_key_values.append(tuple(items))
-                
+
                     past = tuple(new_key_values)
 
                 model_kwargs["past_key_values"] = past
@@ -2260,8 +2210,12 @@ class GenerationMixin:
                 # Do it in-place layer per layer to save memory
                 if isinstance(next_past_key_values, DynamicCache):
                     for layer_idx in range(len(next_past_key_values)):
-                        next_past_key_values.key_cache[layer_idx] = next_past_key_values.key_cache[layer_idx][augmented_idx, ...]
-                        next_past_key_values.value_cache[layer_idx] = next_past_key_values.value_cache[layer_idx][augmented_idx, ...]
+                        next_past_key_values.key_cache[layer_idx] = next_past_key_values.key_cache[layer_idx][
+                            augmented_idx, ...
+                        ]
+                        next_past_key_values.value_cache[layer_idx] = next_past_key_values.value_cache[layer_idx][
+                            augmented_idx, ...
+                        ]
                 else:
                     new_key_values = []
                     for layer in next_past_key_values:
@@ -2272,7 +2226,6 @@ class GenerationMixin:
                         new_key_values.append(tuple(items))
 
                     next_past_key_values = tuple(new_key_values)
-
 
             logit_for_next_step = torch.stack(torch.split(logits, top_k))[range(batch_size), selected_idx, :]
 
@@ -4109,6 +4062,7 @@ class GenerationMixin:
                 )
         else:
             return input_ids
+
 
 def _speculative_sampling(
     candidate_input_ids,

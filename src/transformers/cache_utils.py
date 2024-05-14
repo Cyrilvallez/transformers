@@ -60,7 +60,7 @@ class Cache:
         if max_length is not None and previous_seq_length + new_seq_length > max_length:
             return max_length - new_seq_length
         return previous_seq_length
-    
+
     def reorder_cache(self, beam_idx: torch.LongTensor):
         """Reorders the cache for beam search, given the selected beam indices."""
         for layer_idx in range(len(self.key_cache)):
@@ -183,7 +183,7 @@ class DynamicCache(Cache):
                 key_states, value_states = past_key_values[layer_idx]
                 cache.update(key_states, value_states, layer_idx)
         return cache
-    
+
     def crop(self, maximum_length: int):
         """Crop the past key values up to a new `maximum_length` in terms of tokens. `maximum_length` can also be
         negative to remove `maximum_length` tokens."""
