@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 import torch
 
 from ..cache_utils import DynamicCache
+from .logits_process import LogitsProcessorList, MinLengthLogitsProcessor
 
 
 if TYPE_CHECKING:

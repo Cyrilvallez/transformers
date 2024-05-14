@@ -24,7 +24,7 @@ import torch
 import torch.distributed as dist
 from torch import nn
 
-from ..cache_utils import Cache, DynamicCache, EfficientDynamicCache, StaticCache
+from ..cache_utils import Cache, DynamicCache, StaticCache
 from ..integrations.deepspeed import is_deepspeed_zero3_enabled
 from ..modeling_outputs import CausalLMOutputWithPast, Seq2SeqLMOutput
 from ..models.auto import (
@@ -1620,7 +1620,7 @@ class GenerationMixin:
         # Use DynamicCache() instance by default. This will avoid back and forth from legacy format that
         # keeps copying the cache thus using much more memory
         elif generation_config.cache_implementation is None and self._supports_cache_class:
-            past = model_kwargs.get('past_key_values', None)
+            past = model_kwargs.get("past_key_values", None)
             if past is None:
                 model_kwargs["past_key_values"] = DynamicCache()
             elif isinstance(past, tuple):
@@ -2029,8 +2029,7 @@ class GenerationMixin:
                     )
                 elif (
                     not isinstance(past_key_values[0], (tuple, torch.Tensor))
-                    or (isinstance(past_key_values[0][0], torch.Tensor) and past_key_values[0][0].shape[0] != batch_size)
-                    or (isinstance(past_key_values[0][0], list) and past_key_values[0][0][0].shape[0] != batch_size)
+                    or past_key_values[0][0].shape[0] != batch_size
                 ):
                     raise ValueError(
                         f"{self.__class__.__name__} does not have a standard cache format and therefore **can't** be "
@@ -2085,7 +2084,7 @@ class GenerationMixin:
                         for item in layer:
                             items.append(item.repeat_interleave(top_k, dim=0))
                         new_key_values.append(tuple(items))
-                
+
                     past = tuple(new_key_values)
 
                 model_kwargs["past_key_values"] = past
@@ -2145,7 +2144,7 @@ class GenerationMixin:
             selected_idx = selected_idx.to("cpu")
 
             # This will be used instead of the previous inneficient torch.stack(torch.split())
-            augmented_idx = torch.tensor([x + i*top_k for i, x in enumerate(selected_idx)])
+            augmented_idx = torch.tensor([x + i * top_k for i, x in enumerate(selected_idx)])
 
             # prepare for the next step: (1) next token_id; (2) past_key_values; (3) last_hidden_states for computing
             # the degeneration penalty; (4) logits for selecting next top-k candidates; (5) selected tokens scores
@@ -2179,8 +2178,12 @@ class GenerationMixin:
                 # Do it in-place layer per layer to save memory
                 if isinstance(next_past_key_values, DynamicCache):
                     for layer_idx in range(len(next_past_key_values)):
-                        next_past_key_values.key_cache[layer_idx] = next_past_key_values.key_cache[layer_idx][augmented_idx, ...]
-                        next_past_key_values.value_cache[layer_idx] = next_past_key_values.value_cache[layer_idx][augmented_idx, ...]
+                        next_past_key_values.key_cache[layer_idx] = next_past_key_values.key_cache[layer_idx][
+                            augmented_idx, ...
+                        ]
+                        next_past_key_values.value_cache[layer_idx] = next_past_key_values.value_cache[layer_idx][
+                            augmented_idx, ...
+                        ]
                 else:
                     new_key_values = []
                     for layer in next_past_key_values:
@@ -2191,7 +2194,6 @@ class GenerationMixin:
                         new_key_values.append(tuple(items))
 
                     next_past_key_values = tuple(new_key_values)
-
 
             logit_for_next_step = torch.stack(torch.split(logits, top_k))[range(batch_size), selected_idx, :]
 
@@ -3647,6 +3649,7 @@ class GenerationMixin:
                 )
         else:
             return input_ids
+
 
 def _speculative_sampling(
     candidate_input_ids,
