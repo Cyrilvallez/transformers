@@ -1213,7 +1213,13 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, num_logits_to_keep=None, **kwargs
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        num_logits_to_keep=None,
+        **kwargs,
     ):
         past_length = 0
         # Omit tokens covered by past_key_values
