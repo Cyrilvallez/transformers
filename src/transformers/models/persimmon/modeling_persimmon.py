@@ -755,6 +755,7 @@ class PersimmonForCausalLM(PersimmonPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        num_logits_to_keep: Optional[int] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -762,6 +763,11 @@ class PersimmonForCausalLM(PersimmonPreTrainedModel):
                 Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
                 config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
                 (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
+
+            num_logits_to_keep (`int` or `None`, *optional*):
+                    Calculate logits for the last `num_logits_to_keep` tokens. If `None`, calculate logits for all
+                    `input_ids`. Only last token logits are needed for generation, and calculating them only for that token
+                    can save memory, which becomes pretty significant for long sequences.
 
         Returns:
 
@@ -802,7 +808,11 @@ class PersimmonForCausalLM(PersimmonPreTrainedModel):
         )
 
         hidden_states = outputs[0]
-        logits = self.lm_head(hidden_states)
+        # No upscaling to float was ever done for Persimmon
+        if num_logits_to_keep is None:
+            logits = self.lm_head(hidden_states)
+        else:
+            logits = self.lm_head(hidden_states[:, -num_logits_to_keep:, :])
 
         loss = None
         if labels is not None:
@@ -830,7 +840,7 @@ class PersimmonForCausalLM(PersimmonPreTrainedModel):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
+        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, num_logits_to_keep=None, **kwargs
     ):
         past_length = 0
         if past_key_values is not None:
@@ -879,6 +889,7 @@ class PersimmonForCausalLM(PersimmonPreTrainedModel):
                 "past_key_values": past_key_values,
                 "use_cache": kwargs.get("use_cache"),
                 "attention_mask": attention_mask,
+                "num_logits_to_keep": num_logits_to_keep,
             }
         )
         return model_inputs
