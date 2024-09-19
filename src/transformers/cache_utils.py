@@ -428,10 +428,9 @@ class DynamicCache(Cache):
         kv_seq_len = self.get_seq_length(layer_idx)
 
         if (
-                getattr(self.config, "sliding_window", None) is not None
-                and kv_seq_len > self.config.sliding_window
+                kv_seq_len > 4096
             ):
-                slicing_tokens = 1 - self.config.sliding_window
+                slicing_tokens = 1 - 4096
 
                 self.key_cache[layer_idx] = self.key_cache[layer_idx][:, :, slicing_tokens:, :]
                 self.value_cache[layer_idx] = self.value_cache[layer_idx][:, :, slicing_tokens:, :]
