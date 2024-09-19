@@ -424,6 +424,18 @@ class DynamicCache(Cache):
             self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
             self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
 
+
+        kv_seq_len = self.get_seq_length(layer_idx)
+
+        if (
+                getattr(self.config, "sliding_window", None) is not None
+                and kv_seq_len > self.config.sliding_window
+            ):
+                slicing_tokens = 1 - self.config.sliding_window
+
+                self.key_cache[layer_idx] = self.key_cache[layer_idx][:, :, slicing_tokens:, :]
+                self.value_cache[layer_idx] = self.value_cache[layer_idx][:, :, slicing_tokens:, :]
+
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
